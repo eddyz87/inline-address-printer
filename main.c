@@ -31,6 +31,7 @@ struct ctx
   int frame_base_reg;
 
   long all_formals_all_simple_callsites;
+  long all_formals_ccmatch_callsites;
   long all_formals_callsites;
   long total_callsites;
   long simple_formals;
@@ -124,6 +125,20 @@ static char *dwarf_reg_to_x86(int num)
   case 15: return "r15";
   }
   return NULL;
+}
+
+static int x86_cc_param_reg(int num)
+{
+  switch (num) {
+  case 1: return DW_OP_reg5; // rdi
+  case 2: return DW_OP_reg4; // rsi
+  case 3: return DW_OP_reg1; // rdx
+  case 4: return DW_OP_reg2; // rcx
+  case 5: return DW_OP_reg8; // r8
+  case 6: return DW_OP_reg9; // r9
+  default:
+    return 0;
+  }
 }
 
 static bool decode_expr(struct ctx *ctx, int frame_base_reg, Dwarf_Op *expr)
@@ -317,6 +332,7 @@ static void show_die(struct ctx *ctx, Dwarf_Die *die)
   int num_simple_formals = 0;
   int num_known_formals = 0;
   int num_formals = 0;
+  int num_ccmatch = 0;
   unsigned int tag;
   ptrdiff_t off;
   int padding;
@@ -389,6 +405,8 @@ static void show_die(struct ctx *ctx, Dwarf_Die *die)
         ++num_simple_formals;
       else
         report(ctx, "<complex_loc>");
+      if (exprlen == 1 && exprs[0].atom == x86_cc_param_reg(num_formals))
+        ++num_ccmatch;
       ++num_known_formals;
     } else if (dwarf_attr(&formal, DW_AT_location, &attr)) {
       report(ctx, " <no_entry_loc>");
@@ -402,9 +420,11 @@ static void show_die(struct ctx *ctx, Dwarf_Die *die)
   ctx->known_formals += num_known_formals;
   ctx->simple_formals += num_simple_formals;
   if (num_formals == origin_formals.count &&
-      num_formals == num_simple_formals &&
-      num_formals == num_known_formals)
+      num_formals == num_simple_formals)
     ++ctx->all_formals_all_simple_callsites;
+  if (num_formals == origin_formals.count &&
+      num_formals == num_ccmatch)
+    ++ctx->all_formals_ccmatch_callsites;
   if (num_formals == origin_formals.count &&
       num_formals == num_known_formals)
     ++ctx->all_formals_callsites;
@@ -676,20 +696,23 @@ int main (int argc, char *argv[])
     if (ctx.total_callsites > 0)
           printf("\n");
 
-    printf("# Total inlined callsites                             : %ld\n", ctx.total_callsites);
-    printf("#   with all formals present                          : %ld (%2.f%%)\n",
+    printf("# Total inlined callsites                             : %6ld\n", ctx.total_callsites);
+    printf("#   with all formals present                          : %6ld (%2.f%%)\n",
            ctx.all_formals_callsites,
            (double)ctx.all_formals_callsites / ctx.total_callsites * 100);
-    printf("#   with all formals present and in simple locations  : %ld (%2.f%%)\n",
+    printf("#   with all formals present and in simple locations  : %6ld (%2.f%%)\n",
            ctx.all_formals_all_simple_callsites,
            (double)ctx.all_formals_all_simple_callsites / ctx.total_callsites * 100);
+    printf("#   with all formals as in calling convention         : %6ld (%2.f%%)\n",
+           ctx.all_formals_ccmatch_callsites,
+           (double)ctx.all_formals_ccmatch_callsites / ctx.total_callsites * 100);
 
     printf("#\n");
-    printf("# Total formals                                       : %ld\n", ctx.total_formals);
-    printf("#   with location                                     : %ld (%2.f%%)\n",
+    printf("# Total formals                                       : %6ld\n", ctx.total_formals);
+    printf("#   with location                                     : %6ld (%2.f%%)\n",
            ctx.known_formals,
            (double)ctx.known_formals / ctx.total_formals * 100);
-    printf("#   with simple location                              : %ld (%2.f%%)\n",
+    printf("#   with simple location                              : %6ld (%2.f%%)\n",
            ctx.simple_formals,
            (double)ctx.simple_formals / ctx.total_formals * 100);
     printf("\n");
